@@ -165,9 +165,14 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 async function start() {
-  await ragSystem.init();
+  // RAG init is best-effort — server must start even if storage is unavailable
+  try {
+    await ragSystem.init();
+  } catch (err) {
+    console.warn('[synelium] RAG init failed, continuing without RAG:', (err as Error).message);
+  }
 
-  const server = app.listen(config.port, () => {
+  const server = app.listen(config.port, '0.0.0.0', () => {
     console.log(`[synelium] listening on port ${config.port}`);
     console.log(`[synelium] dashboard → http://localhost:${config.port}/dashboard`);
     console.log(`[synelium] health   → http://localhost:${config.port}/health`);

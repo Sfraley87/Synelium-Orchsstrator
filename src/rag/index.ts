@@ -49,7 +49,10 @@ export class RagSystem {
     this.openai = config.openai.apiKey ? new OpenAI({ apiKey: config.openai.apiKey }) : null;
 
     const pgConfig = config.postgres.connectionString
-      ? { connectionString: config.postgres.connectionString }
+      ? {
+          connectionString: config.postgres.connectionString,
+          ssl: { rejectUnauthorized: false }, // required for Railway-managed Postgres
+        }
       : {
           host: config.postgres.host,
           port: config.postgres.port,
@@ -61,12 +64,13 @@ export class RagSystem {
   }
 
   async init(): Promise<void> {
+    // Never throw — RAG unavailability must not prevent server startup
     try {
       this.collection = await this.chroma.getOrCreateCollection({ name: COLLECTION_NAME });
       this.useChroma = true;
       console.log('[rag] ChromaDB connected, collection:', COLLECTION_NAME);
     } catch (err) {
-      console.warn('[rag] ChromaDB unavailable, falling back to pgvector:', (err as Error).message);
+      console.warn('[rag] ChromaDB unavailable, trying pgvector:', (err as Error).message);
       this.useChroma = false;
       await this.initPgVector();
     }
@@ -85,7 +89,10 @@ export class RagSystem {
       `);
       console.log('[rag] pgvector table ready');
     } catch (err) {
-      console.error('[rag] pgvector init failed:', (err as Error).message);
+      console.warn('[rag] pgvector unavailable, RAG disabled:', (err as Error).message);
+      // Drain the pool so it doesn't hold open connections
+      try { await this.pg?.end(); } catch {}
+      this.pg = null;
     }
   }
 
