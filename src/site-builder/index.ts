@@ -336,16 +336,24 @@ export function buildDashboardHTML(data: DashboardData): string {
           body: JSON.stringify({ message: 'Confirm — build the workflow.', sessionId, confirmWorkflow: true }),
         });
         const data = await res.json();
-        hideBanner();
-        const summary = data.plan
-          ? 'Workflow created in n8n! (' + (data.plan.workflowType || 'custom') + ', ' + (data.plan.steps?.length || 0) + ' steps)'
-          : 'Workflow pushed.';
-        appendMessage('exec', summary, currentExec);
-        if (data.plan?.n8nWorkflow?.id) {
-          appendMessage('exec', 'n8n workflow ID: ' + data.plan.n8nWorkflow.id, currentExec);
+        if (!res.ok || data.error) {
+          appendMessage('exec', 'Build failed: ' + (data.error || res.statusText), currentExec);
+        } else {
+          hideBanner();
+          if (data.plan?.error) {
+            appendMessage('exec', 'Plan built but n8n push failed: ' + data.plan.error, currentExec);
+          } else {
+            const summary = data.plan
+              ? 'Workflow created in n8n! (' + (data.plan.workflowType || 'custom') + ', ' + (data.plan.steps?.length || 0) + ' steps)'
+              : 'Workflow pushed.';
+            appendMessage('exec', summary, currentExec);
+            if (data.plan?.n8nWorkflow?.id) {
+              appendMessage('exec', 'n8n workflow ID: ' + data.plan.n8nWorkflow.id, currentExec);
+            }
+          }
         }
       } catch (e) {
-        appendMessage('exec', 'Error building workflow: ' + e.message, currentExec);
+        appendMessage('exec', 'Build failed (network): ' + e.message, currentExec);
       } finally {
         btn.disabled = false;
         btn.textContent = 'Build workflow in n8n →';

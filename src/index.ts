@@ -230,13 +230,18 @@ app.post('/board/chat', async (req: Request, res: Response) => {
     const sessionHistory = getSession(sid);
     const context = sessionHistory.map((m) => `${m.role === 'user' ? 'User' : m.executive ?? 'Executive'}: ${m.content}`).join('\n');
 
-    const plan = await subAgent.buildWorkflow({ executive: pending.executive, decision: pending.decision, context });
-    pendingWorkflows.delete(sid);
+    try {
+      const plan = await subAgent.buildWorkflow({ executive: pending.executive, decision: pending.decision, context });
+      pendingWorkflows.delete(sid);
 
-    appendToSession(sid, { role: 'user', content: message });
-    appendToSession(sid, { role: 'assistant', executive: pending.executive, content: `Workflow pushed. Decision: "${pending.decision}"` });
+      appendToSession(sid, { role: 'user', content: message! });
+      appendToSession(sid, { role: 'assistant', executive: pending.executive, content: `Workflow pushed. Decision: "${pending.decision}"` });
 
-    res.json({ sessionId: sid, workflowPushed: true, executive: pending.executive, decision: pending.decision, plan });
+      res.json({ sessionId: sid, workflowPushed: true, executive: pending.executive, decision: pending.decision, plan });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: `Workflow build failed: ${msg}` });
+    }
     return;
   }
 
