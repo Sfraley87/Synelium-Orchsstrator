@@ -3,7 +3,8 @@ import { config } from './config';
 import { router } from './router';
 import { adapterRegistry } from './adapters';
 import { ragSystem } from './rag';
-import { executiveRegistry } from './executives';
+import { executiveRegistry, getSession, appendToSession, clearSession } from './executives';
+import { subAgentRegistry } from './subagents';
 import { buildDashboardHTML } from './site-builder';
 import type { Task } from './router';
 
@@ -131,6 +132,133 @@ app.post('/executive/:name/task', async (req: Request, res: Response) => {
 
   const result = await exec.handle({ prompt, useRag: useRag ?? true });
   res.json(result);
+});
+
+// ── Board endpoints ───────────────────────────────────────────────────────────
+
+// POST /board/discuss — all execs weigh in on a topic, then respond to each other
+app.post('/board/discuss', async (req: Request, res: Response) => {
+  const { topic, executives: names } = req.body as { topic?: string; executives?: string[] };
+  if (!topic) {
+    res.status(400).json({ error: 'topic is required' });
+    return;
+  }
+
+  const board = names && names.length
+    ? names.map((n) => executiveRegistry.get(n)).filter(Boolean)
+    : executiveRegistry.all();
+
+  if (!board.length) {
+    res.status(400).json({ error: 'No valid executives found' });
+    return;
+  }
+
+  // Round 1: each exec gives initial take
+  const initialResponses = await Promise.all(
+    board.map(async (exec) => {
+      const result = await exec!.handle({ prompt: topic, useRag: false });
+      return { executive: result.executive, role: result.role, response: result.response };
+    })
+  );
+
+  // Round 2: each exec sees what others said and responds
+  const debateResponses = await Promise.all(
+    board.map(async (exec) => {
+      const others = initialResponses.filter((r) => r.executive !== exec!.name);
+      const reply = await exec!.boardReply(topic, others);
+      return { executive: exec!.name, role: exec!.role, response: reply };
+    })
+  );
+
+  res.json({
+    topic,
+    executives: board.map((e) => ({ name: e!.name, role: e!.role })),
+    round1: initialResponses,
+    round2: debateResponses,
+  });
+});
+
+// POST /board/chat — ongoing conversation with the full board or one exec
+app.post('/board/chat', async (req: Request, res: Response) => {
+  const { message, sessionId, executive: execName } = req.body as {
+    message?: string;
+    sessionId?: string;
+    executive?: string;
+  };
+
+  if (!message) {
+    res.status(400).json({ error: 'message is required' });
+    return;
+  }
+
+  const sid = sessionId ?? `session-${Date.now()}`;
+  appendToSession(sid, { role: 'user', content: message });
+
+  if (execName) {
+    // Chat with a specific executive
+    const exec = executiveRegistry.get(execName);
+    if (!exec) {
+      res.status(404).json({ error: `Executive '${execName}' not found`, available: executiveRegistry.list() });
+      return;
+    }
+    const result = await exec.handle({ prompt: message, sessionId: sid, useRag: false });
+    res.json({ sessionId: sid, responses: [result] });
+  } else {
+    // All execs respond
+    const responses = await Promise.all(
+      executiveRegistry.all().map((exec) => exec.handle({ prompt: message, sessionId: sid, useRag: false }))
+    );
+    res.json({ sessionId: sid, responses });
+  }
+});
+
+// DELETE /board/chat/:sessionId — clear session history
+app.delete('/board/chat/:sessionId', (req: Request, res: Response) => {
+  clearSession(req.params['sessionId'] as string);
+  res.json({ cleared: true });
+});
+
+// GET /board/chat/:sessionId — get session history
+app.get('/board/chat/:sessionId', (req: Request, res: Response) => {
+  const history = getSession(req.params['sessionId'] as string);
+  res.json({ sessionId: req.params['sessionId'], messages: history });
+});
+
+// ── Sub-agent: decision → workflow plan ───────────────────────────────────────
+
+// POST /executive/:name/decide — exec makes a decision, sub-agent builds the workflow
+app.post('/executive/:name/decide', async (req: Request, res: Response) => {
+  const execName = req.params['name'] as string;
+  const { decision, context, orgName } = req.body as {
+    decision?: string;
+    context?: string;
+    orgName?: string;
+  };
+
+  if (!decision) {
+    res.status(400).json({ error: 'decision is required' });
+    return;
+  }
+
+  const exec = executiveRegistry.get(execName);
+  if (!exec) {
+    res.status(404).json({ error: `Executive '${execName}' not found`, available: executiveRegistry.list() });
+    return;
+  }
+
+  const subAgent = subAgentRegistry.getByExecutive(execName);
+  if (!subAgent) {
+    res.status(404).json({ error: `No sub-agent found for executive '${execName}'` });
+    return;
+  }
+
+  const plan = await subAgent.buildWorkflow({ executive: execName, decision, context, orgName });
+  res.json({ executive: execName, plan });
+});
+
+// GET /subagents — list available sub-agents
+app.get('/subagents', (_req: Request, res: Response) => {
+  res.json({ subAgents: subAgentRegistry.list() });
 });
 
 // ── RAG endpoints ─────────────────────────────────────────────────────────────
