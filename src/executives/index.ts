@@ -66,8 +66,11 @@ abstract class BaseExecutive {
     const history: Anthropic.MessageParam[] = [];
 
     if (task.sessionId) {
+      // Exclude the last message — it's the current user message just pre-appended
+      // by the caller. We'll add it below as the live prompt so it's not duplicated.
       const session = getSession(task.sessionId);
-      for (const msg of session) {
+      const prior = session.slice(0, -1);
+      for (const msg of prior) {
         if (msg.role === 'user') {
           history.push({ role: 'user', content: msg.content });
         } else if (msg.executive === this.name) {

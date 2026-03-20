@@ -29,6 +29,31 @@ export interface EngineAdapter {
   isHealthy(): Promise<boolean>;
 }
 
+// ── n8n Workflow Types ────────────────────────────────────────────────────────
+
+export interface N8nNode {
+  id: string;
+  name: string;
+  type: string;
+  typeVersion: number;
+  position: [number, number];
+  parameters: Record<string, unknown>;
+}
+
+export interface N8nWorkflowDefinition {
+  name: string;
+  nodes: N8nNode[];
+  connections: Record<string, unknown>;
+  settings?: Record<string, unknown>;
+  active?: boolean;
+}
+
+export interface N8nWorkflow extends N8nWorkflowDefinition {
+  id: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // ── n8n Adapter ──────────────────────────────────────────────────────────────
 
 export class N8nAdapter implements EngineAdapter {
@@ -79,6 +104,48 @@ export class N8nAdapter implements EngineAdapter {
     } catch {
       return false;
     }
+  }
+
+  private get headers() {
+    return { 'X-N8N-API-KEY': this.apiKey, 'Content-Type': 'application/json' };
+  }
+
+  async listWorkflows(): Promise<N8nWorkflow[]> {
+    const res = await axios.get(`${this.endpoint}/api/v1/workflows`, {
+      headers: this.headers,
+      timeout: 5000,
+    });
+    return (res.data?.data ?? res.data ?? []) as N8nWorkflow[];
+  }
+
+  async createWorkflow(definition: N8nWorkflowDefinition): Promise<N8nWorkflow> {
+    const res = await axios.post(`${this.endpoint}/api/v1/workflows`, definition, {
+      headers: this.headers,
+      timeout: 10000,
+    });
+    return res.data as N8nWorkflow;
+  }
+
+  async updateWorkflow(id: string, definition: Partial<N8nWorkflowDefinition>): Promise<N8nWorkflow> {
+    const res = await axios.put(`${this.endpoint}/api/v1/workflows/${id}`, definition, {
+      headers: this.headers,
+      timeout: 10000,
+    });
+    return res.data as N8nWorkflow;
+  }
+
+  async activateWorkflow(id: string): Promise<void> {
+    await axios.post(`${this.endpoint}/api/v1/workflows/${id}/activate`, {}, {
+      headers: this.headers,
+      timeout: 5000,
+    });
+  }
+
+  async deleteWorkflow(id: string): Promise<void> {
+    await axios.delete(`${this.endpoint}/api/v1/workflows/${id}`, {
+      headers: this.headers,
+      timeout: 5000,
+    });
   }
 }
 

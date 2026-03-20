@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
+import { adapterRegistry, N8nAdapter, N8nWorkflow } from '../adapters';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ export interface WorkflowPlan {
   workflowType: string;
   steps: WorkflowStep[];
   saasSpec: SaaSSpec;
+  n8nWorkflow?: N8nWorkflow;   // set when the workflow was pushed to n8n
 }
 
 export interface WorkflowStep {
@@ -97,7 +99,7 @@ Return only valid JSON, no markdown, no explanation.`;
       const text = res.content[0]?.type === 'text' ? res.content[0].text : '{}';
       const parsed = JSON.parse(text);
 
-      return {
+      const plan: WorkflowPlan = {
         executive: req.executive,
         department: this.department,
         decision: req.decision,
@@ -105,8 +107,62 @@ Return only valid JSON, no markdown, no explanation.`;
         steps: parsed.steps ?? [],
         saasSpec: parsed.saasSpec ?? { name: '', description: '', features: [], dataModels: [], integrations: [], deploymentNotes: '' },
       };
+
+      // Attempt to generate and push a real n8n workflow
+      const n8nWorkflow = await this.pushToN8n(client, plan, req);
+      if (n8nWorkflow) plan.n8nWorkflow = n8nWorkflow;
+
+      return plan;
     } catch {
       return this.stubPlan(req);
+    }
+  }
+
+  private async pushToN8n(client: Anthropic, plan: WorkflowPlan, req: WorkflowRequest): Promise<N8nWorkflow | null> {
+    const adapter = adapterRegistry.get('n8n');
+    if (!(adapter instanceof N8nAdapter)) return null;
+
+    const healthy = await adapter.isHealthy().catch(() => false);
+    if (!healthy) return null;
+
+    const n8nPrompt = `You are an n8n workflow JSON generator.
+
+Based on this workflow plan, generate a valid n8n workflow JSON object.
+
+Decision: "${req.decision}"
+Department: ${plan.department}
+Steps:
+${plan.steps.map((s) => `${s.order}. ${s.name} — ${s.description} (tooling: ${s.tooling ?? 'n/a'}, automated: ${s.automated})`).join('\n')}
+Integrations: ${plan.saasSpec.integrations.join(', ') || 'none'}
+
+Generate a complete n8n workflow with:
+- A descriptive "name"
+- Realistic nodes using n8n node types (e.g. n8n-nodes-base.httpRequest, n8n-nodes-base.slack, n8n-nodes-base.gmail, n8n-nodes-base.googleSheets, n8n-nodes-base.webhook, etc.)
+- Proper "connections" wiring the nodes in order
+- Each node must have: id (uuid-style), name, type, typeVersion (1), position ([x,y] spaced 200px apart), parameters
+
+Return only valid JSON matching this structure:
+{
+  "name": "...",
+  "nodes": [...],
+  "connections": {...},
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}`;
+
+    try {
+      const res = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 3000,
+        messages: [{ role: 'user', content: n8nPrompt }],
+      });
+
+      const text = res.content[0]?.type === 'text' ? res.content[0].text : '{}';
+      const definition = JSON.parse(text);
+      const created = await adapter.createWorkflow(definition);
+      return created;
+    } catch {
+      return null;
     }
   }
 

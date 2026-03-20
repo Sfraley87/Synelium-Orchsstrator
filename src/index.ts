@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { config } from './config';
 import { router } from './router';
-import { adapterRegistry } from './adapters';
+import { adapterRegistry, N8nAdapter } from './adapters';
 import { ragSystem } from './rag';
 import { executiveRegistry, getSession, appendToSession, clearSession } from './executives';
 import { subAgentRegistry } from './subagents';
@@ -358,6 +358,78 @@ app.post('/rag/query', async (req: Request, res: Response) => {
 
 app.get('/router/status', (_req: Request, res: Response) => {
   res.json(router.status());
+});
+
+// ── n8n Workflow Management ───────────────────────────────────────────────────
+
+function getN8nAdapter(): N8nAdapter | null {
+  const adapter = adapterRegistry.get('n8n');
+  return adapter instanceof N8nAdapter ? adapter : null;
+}
+
+// GET /n8n/workflows — list all workflows in n8n
+app.get('/n8n/workflows', async (_req: Request, res: Response) => {
+  const n8n = getN8nAdapter();
+  if (!n8n) { res.status(503).json({ error: 'n8n adapter not available' }); return; }
+  try {
+    const workflows = await n8n.listWorkflows();
+    res.json({ workflows });
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to reach n8n', detail: (err as Error).message });
+  }
+});
+
+// POST /n8n/workflows — create a workflow in n8n
+app.post('/n8n/workflows', async (req: Request, res: Response) => {
+  const n8n = getN8nAdapter();
+  if (!n8n) { res.status(503).json({ error: 'n8n adapter not available' }); return; }
+  const definition = req.body;
+  if (!definition?.name || !Array.isArray(definition?.nodes)) {
+    res.status(400).json({ error: 'Workflow definition requires at least name and nodes' });
+    return;
+  }
+  try {
+    const workflow = await n8n.createWorkflow(definition);
+    res.status(201).json({ workflow });
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to create workflow in n8n', detail: (err as Error).message });
+  }
+});
+
+// PUT /n8n/workflows/:id — update an existing workflow
+app.put('/n8n/workflows/:id', async (req: Request, res: Response) => {
+  const n8n = getN8nAdapter();
+  if (!n8n) { res.status(503).json({ error: 'n8n adapter not available' }); return; }
+  try {
+    const workflow = await n8n.updateWorkflow(req.params['id'] as string, req.body);
+    res.json({ workflow });
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to update workflow', detail: (err as Error).message });
+  }
+});
+
+// POST /n8n/workflows/:id/activate — activate a workflow
+app.post('/n8n/workflows/:id/activate', async (req: Request, res: Response) => {
+  const n8n = getN8nAdapter();
+  if (!n8n) { res.status(503).json({ error: 'n8n adapter not available' }); return; }
+  try {
+    await n8n.activateWorkflow(req.params['id'] as string);
+    res.json({ activated: true, id: req.params['id'] });
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to activate workflow', detail: (err as Error).message });
+  }
+});
+
+// DELETE /n8n/workflows/:id — delete a workflow
+app.delete('/n8n/workflows/:id', async (req: Request, res: Response) => {
+  const n8n = getN8nAdapter();
+  if (!n8n) { res.status(503).json({ error: 'n8n adapter not available' }); return; }
+  try {
+    await n8n.deleteWorkflow(req.params['id'] as string);
+    res.json({ deleted: true, id: req.params['id'] });
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to delete workflow', detail: (err as Error).message });
+  }
 });
 
 // ── Error handler ─────────────────────────────────────────────────────────────
