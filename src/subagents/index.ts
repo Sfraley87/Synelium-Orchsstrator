@@ -97,13 +97,22 @@ Return only valid JSON, no markdown, no explanation.`;
 
     const res = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
     });
 
+    if (res.stop_reason === 'max_tokens') {
+      throw new Error('Workflow plan response was truncated. Try a simpler workflow description.');
+    }
     const raw = res.content[0]?.type === 'text' ? res.content[0].text : '{}';
     const text = stripJsonFences(raw);
-    const parsed = JSON.parse(text);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`Claude returned invalid JSON for workflow plan. Raw: ${text.slice(0, 200)}`);
+    }
 
     const plan: WorkflowPlan = {
       executive: req.executive,
@@ -165,12 +174,21 @@ Return only valid JSON, no markdown, no explanation.`;
 
     const res = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 3000,
+      max_tokens: 8192,
       messages: [{ role: 'user', content: n8nPrompt }],
     });
 
+    if (res.stop_reason === 'max_tokens') {
+      return { workflow: null, error: 'n8n workflow JSON was truncated (too large). Workflow plan was saved but not pushed to n8n.' };
+    }
     const raw = res.content[0]?.type === 'text' ? res.content[0].text : '{}';
-    const definition = JSON.parse(stripJsonFences(raw));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let definition: any;
+    try {
+      definition = JSON.parse(stripJsonFences(raw));
+    } catch {
+      return { workflow: null, error: `Claude returned invalid JSON for n8n workflow. Raw snippet: ${raw.slice(0, 200)}` };
+    }
     const created = await adapter.createWorkflow(definition);
     return { workflow: created };
   }
