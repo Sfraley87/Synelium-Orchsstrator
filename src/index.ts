@@ -8,6 +8,25 @@ import { subAgentRegistry } from './subagents';
 import { buildDashboardHTML } from './site-builder';
 import type { Task } from './router';
 
+// ── Pending workflows (keyed by sessionId) ───────────────────────────────────
+
+interface PendingWorkflow {
+  executive: string;
+  decision: string;
+}
+const pendingWorkflows = new Map<string, PendingWorkflow>();
+
+const WORKFLOW_READY_RE = /\[\[WORKFLOW_READY:\s*(.+?)\]\]/;
+
+function extractWorkflowSignal(text: string): { clean: string; decision: string | null } {
+  const match = WORKFLOW_READY_RE.exec(text);
+  if (!match) return { clean: text, decision: null };
+  return {
+    clean: text.replace(WORKFLOW_READY_RE, '').trim(),
+    decision: match[1]!.trim(),
+  };
+}
+
 // ── Task log (in-memory, last 50) ─────────────────────────────────────────────
 
 interface TaskLogEntry {
@@ -180,10 +199,11 @@ app.post('/board/discuss', async (req: Request, res: Response) => {
 
 // POST /board/chat — ongoing conversation with the full board or one exec
 app.post('/board/chat', async (req: Request, res: Response) => {
-  const { message, sessionId, executive: execName } = req.body as {
+  const { message, sessionId, executive: execName, confirmWorkflow } = req.body as {
     message?: string;
     sessionId?: string;
     executive?: string;
+    confirmWorkflow?: boolean;
   };
 
   if (!message) {
@@ -192,23 +212,74 @@ app.post('/board/chat', async (req: Request, res: Response) => {
   }
 
   const sid = sessionId ?? `session-${Date.now()}`;
+
+  // ── Workflow confirmation path ─────────────────────────────────────────────
+  if (confirmWorkflow) {
+    const pending = pendingWorkflows.get(sid);
+    if (!pending) {
+      res.status(400).json({ error: 'No pending workflow found for this session. Have the executive reach alignment first.' });
+      return;
+    }
+
+    const subAgent = subAgentRegistry.getByExecutive(pending.executive);
+    if (!subAgent) {
+      res.status(404).json({ error: `No sub-agent found for executive '${pending.executive}'` });
+      return;
+    }
+
+    const sessionHistory = getSession(sid);
+    const context = sessionHistory.map((m) => `${m.role === 'user' ? 'User' : m.executive ?? 'Executive'}: ${m.content}`).join('\n');
+
+    const plan = await subAgent.buildWorkflow({ executive: pending.executive, decision: pending.decision, context });
+    pendingWorkflows.delete(sid);
+
+    appendToSession(sid, { role: 'user', content: message });
+    appendToSession(sid, { role: 'assistant', executive: pending.executive, content: `Workflow pushed. Decision: "${pending.decision}"` });
+
+    res.json({ sessionId: sid, workflowPushed: true, executive: pending.executive, decision: pending.decision, plan });
+    return;
+  }
+
+  // ── Normal chat path ───────────────────────────────────────────────────────
   appendToSession(sid, { role: 'user', content: message });
 
   if (execName) {
-    // Chat with a specific executive
     const exec = executiveRegistry.get(execName);
     if (!exec) {
       res.status(404).json({ error: `Executive '${execName}' not found`, available: executiveRegistry.list() });
       return;
     }
     const result = await exec.handle({ prompt: message, sessionId: sid, useRag: false });
-    res.json({ sessionId: sid, responses: [result] });
+    const { clean, decision } = extractWorkflowSignal(result.response);
+    result.response = clean;
+
+    let workflowReady = false;
+    if (decision) {
+      pendingWorkflows.set(sid, { executive: exec.name, decision });
+      workflowReady = true;
+    }
+
+    res.json({ sessionId: sid, responses: [result], workflowReady, pendingDecision: decision ?? undefined });
   } else {
-    // All execs respond
-    const responses = await Promise.all(
+    const results = await Promise.all(
       executiveRegistry.all().map((exec) => exec.handle({ prompt: message, sessionId: sid, useRag: false }))
     );
-    res.json({ sessionId: sid, responses });
+
+    let workflowReady = false;
+    let pendingDecision: string | undefined;
+
+    const responses = results.map((result) => {
+      const { clean, decision } = extractWorkflowSignal(result.response);
+      result.response = clean;
+      if (decision && !workflowReady) {
+        pendingWorkflows.set(sid, { executive: result.executive, decision });
+        workflowReady = true;
+        pendingDecision = decision;
+      }
+      return result;
+    });
+
+    res.json({ sessionId: sid, responses, workflowReady, pendingDecision });
   }
 });
 
