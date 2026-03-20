@@ -1,0 +1,48 @@
+version: '3.9'
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: synelium-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: synelium
+      POSTGRES_USER: synelium
+      POSTGRES_PASSWORD: synelium_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synelium"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: synelium-chroma
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: synelium-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+  prefect:
+    image: prefecthq/prefect:2-python3.11
+    container_name: synelium-prefect
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    volumes:
+      - prefect_data:/root/.prefect
+volumes:
+  postgres_data:
+  chroma_data:
+  n8n_data:
+  prefect_data:
