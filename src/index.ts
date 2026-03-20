@@ -43,6 +43,12 @@ app.get('/health', async (_req: Request, res: Response) => {
   });
 });
 
+// ── Root redirect ─────────────────────────────────────────────────────────────
+
+app.get('/', (_req: Request, res: Response) => {
+  res.redirect('/dashboard');
+});
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 app.get('/dashboard', async (_req: Request, res: Response) => {
