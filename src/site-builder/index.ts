@@ -15,7 +15,7 @@ export function buildDashboardHTML(data: DashboardData): string {
     .join('');
 
   const executiveCards = data.executives
-    .map((name) => `<div class="exec-card">${name}</div>`)
+    .map((name) => `<div class="exec-card" onclick="openExec('${name}')">${name}</div>`)
     .join('');
 
   const taskRows = data.recentTasks
@@ -42,7 +42,26 @@ export function buildDashboardHTML(data: DashboardData): string {
     table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
     td { padding: 6px 8px; border-bottom: 1px solid #2a2a2a; }
     .exec-card { display: inline-block; background: #2a1a4a; color: #a78bfa; border-radius: 8px;
-                 padding: 6px 14px; margin: 4px; font-size: 0.85rem; font-weight: 600; }
+                 padding: 6px 14px; margin: 4px; font-size: 0.85rem; font-weight: 600;
+                 cursor: pointer; transition: background 0.15s; }
+    .exec-card:hover { background: #3d1f6e; }
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+                     z-index: 100; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #1a1a1a; border: 1px solid #3a2a5a; border-radius: 16px;
+             width: min(500px, 95vw); padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; }
+    .modal-title { color: #a78bfa; font-weight: 700; font-size: 1rem; }
+    .modal-close { background: none; border: none; color: #888; font-size: 1.4rem; cursor: pointer; line-height: 1; }
+    .modal textarea { width: 100%; background: #111; border: 1px solid #333; border-radius: 8px;
+                      color: #e0e0e0; padding: 10px 12px; font-size: 0.85rem; resize: vertical;
+                      min-height: 90px; font-family: inherit; }
+    .modal-send { background: #7c3aed; color: white; border: none; border-radius: 8px;
+                  padding: 10px 20px; cursor: pointer; font-size: 0.85rem; align-self: flex-end; }
+    .modal-send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .modal-response { background: #111; border-radius: 8px; padding: 12px; font-size: 0.82rem;
+                      color: #ccc; white-space: pre-wrap; max-height: 300px; overflow-y: auto;
+                      display: none; }
     .rag-box { display: flex; gap: 8px; margin-top: 12px; }
     .rag-box input { flex: 1; background: #111; border: 1px solid #333; border-radius: 8px;
                      color: #e0e0e0; padding: 8px 12px; font-size: 0.85rem; }
@@ -55,6 +74,19 @@ export function buildDashboardHTML(data: DashboardData): string {
 <body>
   <h1>Synelium Orchestrator <span class="badge">MVP</span></h1>
   <p class="subtitle">The AI Operating System for Enterprises — live status dashboard</p>
+
+  <!-- Executive chat modal -->
+  <div class="modal-overlay" id="exec-modal" onclick="closeExecModal(event)">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="modal-exec-name">ECHO</span>
+        <button class="modal-close" onclick="closeModal()">&#x2715;</button>
+      </div>
+      <textarea id="modal-prompt" placeholder="Send a task or question to this executive..."></textarea>
+      <button class="modal-send" id="modal-send-btn" onclick="sendToExec()">Send</button>
+      <pre class="modal-response" id="modal-response"></pre>
+    </div>
+  </div>
 
   <div class="grid">
     <div class="card">
@@ -88,6 +120,58 @@ export function buildDashboardHTML(data: DashboardData): string {
   </div>
 
   <script>
+    let currentExec = '';
+
+    function openExec(name) {
+      currentExec = name;
+      document.getElementById('modal-exec-name').textContent = name;
+      document.getElementById('modal-prompt').value = '';
+      document.getElementById('modal-response').style.display = 'none';
+      document.getElementById('modal-response').textContent = '';
+      document.getElementById('exec-modal').classList.add('open');
+      setTimeout(() => document.getElementById('modal-prompt').focus(), 50);
+    }
+
+    function closeModal() {
+      document.getElementById('exec-modal').classList.remove('open');
+    }
+
+    function closeExecModal(e) {
+      if (e.target.id === 'exec-modal') closeModal();
+    }
+
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+    async function sendToExec() {
+      const prompt = document.getElementById('modal-prompt').value.trim();
+      if (!prompt) return;
+      const btn = document.getElementById('modal-send-btn');
+      const out = document.getElementById('modal-response');
+      btn.disabled = true;
+      btn.textContent = 'Thinking...';
+      out.style.display = 'none';
+      try {
+        const res = await fetch('/executive/' + encodeURIComponent(currentExec) + '/task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+        });
+        const data = await res.json();
+        out.textContent = data.response ?? JSON.stringify(data, null, 2);
+        out.style.display = 'block';
+      } catch (e) {
+        out.textContent = 'Error: ' + e.message;
+        out.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send';
+      }
+    }
+
+    document.getElementById('modal-prompt').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendToExec();
+    });
+
     async function queryRag() {
       const q = document.getElementById('rag-input').value;
       if (!q) return;
