@@ -2,6 +2,11 @@ import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
 import { adapterRegistry, N8nAdapter, N8nWorkflow } from '../adapters';
 
+/** Strip ```json ... ``` or ``` ... ``` fences Claude sometimes wraps around JSON */
+function stripJsonFences(text: string): string {
+  return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface WorkflowRequest {
@@ -19,6 +24,7 @@ export interface WorkflowPlan {
   steps: WorkflowStep[];
   saasSpec: SaaSSpec;
   n8nWorkflow?: N8nWorkflow;   // set when the workflow was pushed to n8n
+  error?: string;              // set when something failed along the way
 }
 
 export interface WorkflowStep {
@@ -50,10 +56,10 @@ abstract class DepartmentSubAgent {
     return config.anthropic.apiKey ? new Anthropic({ apiKey: config.anthropic.apiKey }) : null;
   }
 
-  async buildWorkflow(req: WorkflowRequest): Promise<WorkflowPlan> {
+  async buildWorkflow(req: WorkflowRequest): Promise<WorkflowPlan & { error?: string }> {
     const client = this.anthropic;
     if (!client) {
-      return this.stubPlan(req);
+      return { ...this.stubPlan(req), error: 'No Anthropic API key configured — returned stub plan.' };
     }
 
     const prompt = `You are a ${this.department} workflow architect sub-agent reporting to ${this.executive}.
@@ -89,41 +95,46 @@ Respond with a JSON object matching this exact structure:
 
 Return only valid JSON, no markdown, no explanation.`;
 
-    try {
-      const res = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: prompt }],
-      });
+    const res = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      messages: [{ role: 'user', content: prompt }],
+    });
 
-      const text = res.content[0]?.type === 'text' ? res.content[0].text : '{}';
-      const parsed = JSON.parse(text);
+    const raw = res.content[0]?.type === 'text' ? res.content[0].text : '{}';
+    const text = stripJsonFences(raw);
+    const parsed = JSON.parse(text);
 
-      const plan: WorkflowPlan = {
-        executive: req.executive,
-        department: this.department,
-        decision: req.decision,
-        workflowType: parsed.workflowType ?? 'custom',
-        steps: parsed.steps ?? [],
-        saasSpec: parsed.saasSpec ?? { name: '', description: '', features: [], dataModels: [], integrations: [], deploymentNotes: '' },
-      };
+    const plan: WorkflowPlan = {
+      executive: req.executive,
+      department: this.department,
+      decision: req.decision,
+      workflowType: parsed.workflowType ?? 'custom',
+      steps: parsed.steps ?? [],
+      saasSpec: parsed.saasSpec ?? { name: '', description: '', features: [], dataModels: [], integrations: [], deploymentNotes: '' },
+    };
 
-      // Attempt to generate and push a real n8n workflow
-      const n8nWorkflow = await this.pushToN8n(client, plan, req);
-      if (n8nWorkflow) plan.n8nWorkflow = n8nWorkflow;
+    // Attempt to generate and push a real n8n workflow
+    const { workflow: n8nWorkflow, error: n8nError } = await this.pushToN8n(client, plan, req);
+    if (n8nWorkflow) plan.n8nWorkflow = n8nWorkflow;
 
-      return plan;
-    } catch {
-      return this.stubPlan(req);
-    }
+    return n8nError ? { ...plan, error: n8nError } : plan;
   }
 
-  private async pushToN8n(client: Anthropic, plan: WorkflowPlan, req: WorkflowRequest): Promise<N8nWorkflow | null> {
+  private async pushToN8n(
+    client: Anthropic,
+    plan: WorkflowPlan,
+    req: WorkflowRequest
+  ): Promise<{ workflow: N8nWorkflow | null; error?: string }> {
     const adapter = adapterRegistry.get('n8n');
-    if (!(adapter instanceof N8nAdapter)) return null;
+    if (!(adapter instanceof N8nAdapter)) {
+      return { workflow: null, error: 'n8n adapter not registered.' };
+    }
 
     const healthy = await adapter.isHealthy().catch(() => false);
-    if (!healthy) return null;
+    if (!healthy) {
+      return { workflow: null, error: `n8n is unreachable. Check N8N_ENDPOINT and that n8n is running.` };
+    }
 
     const n8nPrompt = `You are an n8n workflow JSON generator.
 
@@ -148,22 +159,20 @@ Return only valid JSON matching this structure:
   "connections": {...},
   "settings": { "executionOrder": "v1" },
   "active": false
-}`;
+}
 
-    try {
-      const res = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 3000,
-        messages: [{ role: 'user', content: n8nPrompt }],
-      });
+Return only valid JSON, no markdown, no explanation.`;
 
-      const text = res.content[0]?.type === 'text' ? res.content[0].text : '{}';
-      const definition = JSON.parse(text);
-      const created = await adapter.createWorkflow(definition);
-      return created;
-    } catch {
-      return null;
-    }
+    const res = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 3000,
+      messages: [{ role: 'user', content: n8nPrompt }],
+    });
+
+    const raw = res.content[0]?.type === 'text' ? res.content[0].text : '{}';
+    const definition = JSON.parse(stripJsonFences(raw));
+    const created = await adapter.createWorkflow(definition);
+    return { workflow: created };
   }
 
   private stubPlan(req: WorkflowRequest): WorkflowPlan {
