@@ -364,7 +364,7 @@ app.get('/router/status', (_req: Request, res: Response) => {
 
 function getN8nAdapter(): N8nAdapter | null {
   const adapter = adapterRegistry.get('n8n');
-  return adapter instanceof N8nAdapter ? adapter : null;
+  return adapter ? (adapter as N8nAdapter) : null;
 }
 
 // GET /n8n/workflows — list all workflows in n8n
@@ -439,6 +439,9 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: err.message });
 });
 
+// Export app for testing (must come before start() so tests can import without booting)
+export { app };
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 async function start() {
@@ -461,7 +464,10 @@ async function start() {
   });
 }
 
-start().catch((err) => {
-  console.error('[synelium] startup failed:', err);
-  process.exit(1);
-});
+// Only start the server when running directly (not when imported by tests)
+if (require.main === module) {
+  start().catch((err) => {
+    console.error('[synelium] startup failed:', err);
+    process.exit(1);
+  });
+}
