@@ -140,11 +140,144 @@ export function buildDashboardHTML(data: DashboardData): string {
     #rag-result { margin-top: 12px; font-size: 0.8rem; color: #aaa; white-space: pre-wrap; }
     .badge { font-size: 0.65rem; background: #1a2a1a; color: #4ade80;
              border-radius: 4px; padding: 2px 6px; margin-left: 8px; }
+
+    /* ── Onboarding overlay ────────────────────────────────────── */
+    .onboard-overlay { display: none; position: fixed; inset: 0;
+                       background: rgba(0,0,0,0.92); z-index: 200;
+                       align-items: center; justify-content: center; }
+    .onboard-overlay.open { display: flex; }
+    .onboard-modal { background: #111; border: 1px solid #2a2a3a; border-radius: 20px;
+                     width: min(560px, 96vw); max-height: 90vh; overflow-y: auto;
+                     display: flex; flex-direction: column; padding: 32px 32px 24px; gap: 24px; }
+
+    .onboard-logo { font-size: 0.8rem; font-weight: 700; color: #7c3aed;
+                    letter-spacing: .06em; text-transform: uppercase; margin-bottom: 4px; }
+    .onboard-modal h2 { color: #e0e0e0; font-size: 1.3rem; font-weight: 700; margin-bottom: 6px; }
+    .onboard-modal > p, .onboard-header > p { color: #666; font-size: 0.85rem; line-height: 1.5; }
+
+    .quiz-questions { display: flex; flex-direction: column; gap: 20px; }
+    .quiz-q label { display: block; font-size: 0.8rem; color: #888;
+                    text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+    .quiz-options { display: flex; flex-wrap: wrap; gap: 8px; }
+    .quiz-opt { background: #1a1a1a; border: 1px solid #2a2a2a; color: #aaa;
+                border-radius: 8px; padding: 7px 14px; font-size: 0.82rem; cursor: pointer;
+                transition: all 0.15s; font-family: inherit; }
+    .quiz-opt:hover { border-color: #5b21b6; color: #c4b5fd; }
+    .quiz-opt.selected { background: #2a1a4a; border-color: #7c3aed; color: #a78bfa; font-weight: 600; }
+
+    .onboard-btn { background: #7c3aed; color: white; border: none; border-radius: 10px;
+                   padding: 12px 24px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+                   transition: background 0.15s; align-self: flex-start; }
+    .onboard-btn:hover:not(:disabled) { background: #6d28d9; }
+    .onboard-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    .onboard-skip { background: none; border: none; color: #3a3a3a; font-size: 0.75rem;
+                    cursor: pointer; text-decoration: underline; align-self: flex-start;
+                    margin-top: -12px; transition: color 0.15s; font-family: inherit; }
+    .onboard-skip:hover { color: #666; }
+
+    .learn-thread { flex: 1; overflow-y: auto; padding: 4px 0 12px;
+                    display: flex; flex-direction: column; gap: 12px;
+                    min-height: 280px; max-height: 340px; scroll-behavior: smooth; }
+    .learn-thread::-webkit-scrollbar { width: 4px; }
+    .learn-thread::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+    .onboard-grad { display: flex; flex-direction: column; align-items: center;
+                    justify-content: center; text-align: center; gap: 16px; padding: 16px 0; }
+    .onboard-grad .grad-icon { font-size: 3rem; }
+    .onboard-grad h2 { color: #a78bfa; }
+    .onboard-grad p { color: #666; max-width: 340px; font-size: 0.85rem; line-height: 1.5; }
   </style>
 </head>
 <body>
   <h1>Synelium Orchestrator <span class="badge">MVP</span></h1>
   <p class="subtitle">The AI Operating System for Enterprises — live status dashboard</p>
+
+  <!-- ── Onboarding overlay ─────────────────────────────────── -->
+  <div class="onboard-overlay" id="onboard-overlay">
+    <div class="onboard-modal">
+
+      <!-- Step 1: Experience quiz -->
+      <div id="onboard-step-1">
+        <div>
+          <div class="onboard-logo">⚡ Synelium Orchestrator</div>
+          <h2>Let's personalize your experience.</h2>
+          <p>4 quick questions so we can teach you exactly what you need to know — no more, no less.</p>
+        </div>
+
+        <div class="quiz-questions">
+          <div class="quiz-q">
+            <label>Your background</label>
+            <div class="quiz-options" data-key="background">
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'background','new')">Brand new to this</button>
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'background','business')">Business / operations</button>
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'background','technical')">Developer / technical</button>
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'background','both')">Both worlds</button>
+            </div>
+          </div>
+
+          <div class="quiz-q">
+            <label>Experience with AI tools (ChatGPT, Claude, Copilot…)</label>
+            <div class="quiz-options" data-key="aiExperience">
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'aiExperience','none')">Little to none</button>
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'aiExperience','some')">Use them regularly</button>
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'aiExperience','heavy')">Build with them</button>
+            </div>
+          </div>
+
+          <div class="quiz-q">
+            <label>Experience with workflow automation (Zapier, n8n, scripts…)</label>
+            <div class="quiz-options" data-key="automationExperience">
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'automationExperience','none')">Never used any</button>
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'automationExperience','some')">Used some tools</button>
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'automationExperience','heavy')">Run automation daily</button>
+            </div>
+          </div>
+
+          <div class="quiz-q">
+            <label>How do you learn best?</label>
+            <div class="quiz-options" data-key="learningStyle">
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'learningStyle','conceptual')">Explain the concept first</button>
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'learningStyle','examples')">Show me examples</button>
+              <button class="quiz-opt" onclick="selectQuizOpt(this,'learningStyle','hands-on')">Just let me try it</button>
+            </div>
+          </div>
+        </div>
+
+        <button class="onboard-btn" id="onboard-start-btn" onclick="startLearning()" disabled>Start Learning →</button>
+        <button class="onboard-skip" onclick="skipOnboarding()">I already know Synelium — skip</button>
+      </div>
+
+      <!-- Step 2: Adaptive learning chat -->
+      <div id="onboard-step-2" style="display:none; flex-direction:column; gap:16px;">
+        <div>
+          <div class="onboard-logo">🎓 Aria · Your Guide</div>
+          <p style="color:#555; font-size:0.78rem;">Adaptive learning session · powered by Synelium AI</p>
+        </div>
+
+        <div class="learn-thread" id="learn-thread"></div>
+
+        <div class="chat-input-area" style="padding:0;">
+          <textarea class="chat-input" id="learn-input" rows="1"
+            placeholder="Ask Aria anything, or just say 'next'…"
+            onkeydown="handleLearnKey(event)" oninput="autoResize(this)"></textarea>
+          <button class="btn-send" id="learn-send-btn" onclick="sendLearnMessage()">Send</button>
+        </div>
+        <button class="onboard-skip" onclick="skipOnboarding()">Skip — take me to the dashboard</button>
+      </div>
+
+      <!-- Step 3: Graduation -->
+      <div id="onboard-step-3" style="display:none;">
+        <div class="onboard-grad">
+          <div class="grad-icon">🚀</div>
+          <h2>You're ready.</h2>
+          <p>You understand how Synelium works. Click any executive card to start a real conversation and build your first workflow.</p>
+          <button class="onboard-btn" onclick="enterDashboard()">Enter Dashboard →</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
 
   <!-- Executive chat modal -->
   <div class="modal-overlay" id="exec-modal" onclick="closeExecOnBackdrop(event)">
@@ -216,6 +349,127 @@ export function buildDashboardHTML(data: DashboardData): string {
   </div>
 
   <script>
+    // ── Onboarding / Learning ─────────────────────────────────────
+    const PROFILE_KEY = 'synelium_user_profile';
+    let userProfile = null;
+    let learnSessionId = null;
+    let learnWaiting = false;
+    const quizAnswers = {};
+    const QUIZ_KEYS = ['background', 'aiExperience', 'automationExperience', 'learningStyle'];
+
+    (function initOnboarding() {
+      try {
+        const stored = localStorage.getItem(PROFILE_KEY);
+        if (stored) { userProfile = JSON.parse(stored); return; }
+      } catch {}
+      document.getElementById('onboard-overlay').classList.add('open');
+    })();
+
+    function selectQuizOpt(el, key, val) {
+      el.closest('.quiz-options').querySelectorAll('.quiz-opt').forEach(function(b) { b.classList.remove('selected'); });
+      el.classList.add('selected');
+      quizAnswers[key] = val;
+      document.getElementById('onboard-start-btn').disabled = !QUIZ_KEYS.every(function(k) { return quizAnswers[k]; });
+    }
+
+    async function startLearning() {
+      if (!QUIZ_KEYS.every(function(k) { return quizAnswers[k]; })) return;
+      userProfile = Object.assign({}, quizAnswers);
+      document.getElementById('onboard-step-1').style.display = 'none';
+      document.getElementById('onboard-step-2').style.display = 'flex';
+      // Kick off with a greeting message
+      await _learnSend('Hello');
+    }
+
+    async function sendLearnMessage() {
+      const input = document.getElementById('learn-input');
+      const text = input.value.trim();
+      if (!text) return;
+      appendLearnMsg('user', text, 'You');
+      input.value = '';
+      autoResize(input);
+      await _learnSend(text);
+    }
+
+    async function _learnSend(text) {
+      if (learnWaiting) return;
+      learnWaiting = true;
+      document.getElementById('learn-send-btn').disabled = true;
+      _learnTyping(true);
+
+      try {
+        const body = { message: text, profile: userProfile };
+        if (learnSessionId) body.sessionId = learnSessionId;
+
+        const res = await fetch('/learn/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        _learnTyping(false);
+        learnSessionId = data.sessionId;
+
+        if (data.response) appendLearnMsg('tutor', data.response, 'Aria');
+
+        if (data.readyToExplore) {
+          setTimeout(function() {
+            document.getElementById('onboard-step-2').style.display = 'none';
+            document.getElementById('onboard-step-3').style.display = 'block';
+          }, 1200);
+        }
+      } catch (e) {
+        _learnTyping(false);
+        appendLearnMsg('tutor', 'Network error: ' + e.message, 'Aria');
+      } finally {
+        learnWaiting = false;
+        document.getElementById('learn-send-btn').disabled = false;
+        const inp = document.getElementById('learn-input');
+        if (inp) inp.focus();
+      }
+    }
+
+    function appendLearnMsg(role, text, label) {
+      const thread = document.getElementById('learn-thread');
+      const wrap = document.createElement('div');
+      wrap.className = 'msg ' + (role === 'user' ? 'user' : 'exec');
+      wrap.innerHTML =
+        '<div class="msg-label">' + escHtml(label) + '</div>' +
+        '<div class="msg-bubble">' + escHtml(text) + '</div>';
+      thread.appendChild(wrap);
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function _learnTyping(show) {
+      const thread = document.getElementById('learn-thread');
+      const existing = document.getElementById('learn-typing');
+      if (!show) { if (existing) existing.remove(); return; }
+      if (existing) return;
+      const el = document.createElement('div');
+      el.id = 'learn-typing';
+      el.className = 'msg exec';
+      el.innerHTML =
+        '<div class="msg-label">Aria</div>' +
+        '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+      thread.appendChild(el);
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function handleLearnKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendLearnMessage(); }
+    }
+
+    function enterDashboard() {
+      if (userProfile) localStorage.setItem(PROFILE_KEY, JSON.stringify(userProfile));
+      document.getElementById('onboard-overlay').classList.remove('open');
+    }
+
+    function skipOnboarding() {
+      // Save a minimal profile so onboarding doesn't show again
+      if (!userProfile) userProfile = { background: 'both', aiExperience: 'heavy', automationExperience: 'heavy', learningStyle: 'hands-on' };
+      enterDashboard();
+    }
+
     // ── State ────────────────────────────────────────────────────
     let currentExec = '';
     let sessionId = null;

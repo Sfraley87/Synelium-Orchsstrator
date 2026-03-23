@@ -6,6 +6,8 @@ import { ragSystem } from './rag';
 import { executiveRegistry, getSession, appendToSession, clearSession } from './executives';
 import { subAgentRegistry } from './subagents';
 import { buildDashboardHTML } from './site-builder';
+import { learningTutor } from './learning';
+import type { UserProfile } from './learning';
 import type { Task } from './router';
 
 // ── Pending workflows (keyed by sessionId) ───────────────────────────────────
@@ -434,6 +436,36 @@ app.delete('/n8n/workflows/:id', async (req: Request, res: Response) => {
     res.json({ deleted: true, id: req.params['id'] });
   } catch (err) {
     res.status(502).json({ error: 'Failed to delete workflow', detail: (err as Error).message });
+  }
+});
+
+// ── Learning / Onboarding ─────────────────────────────────────────────────────
+
+app.post('/learn/chat', async (req: Request, res: Response) => {
+  const { message, sessionId, profile } = req.body as {
+    message?: string;
+    sessionId?: string;
+    profile?: UserProfile;
+  };
+
+  if (!message) {
+    res.status(400).json({ error: 'message is required' });
+    return;
+  }
+
+  if (!profile?.background || !profile?.aiExperience || !profile?.automationExperience || !profile?.learningStyle) {
+    res.status(400).json({ error: 'profile is required (background, aiExperience, automationExperience, learningStyle)' });
+    return;
+  }
+
+  const sid = sessionId ?? `learn-${Date.now()}`;
+
+  try {
+    const result = await learningTutor.chat(sid, message, profile);
+    res.json({ sessionId: sid, response: result.response, readyToExplore: result.readyToExplore });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Learning session failed: ${msg}` });
   }
 });
 
