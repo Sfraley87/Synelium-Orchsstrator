@@ -11,3 +11,4 @@ projects/
 *.pem
 *.key
 secrets/
+game_env/
